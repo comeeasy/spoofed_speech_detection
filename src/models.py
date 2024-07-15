@@ -7,8 +7,10 @@ import torchmetrics
 
 from peft import LoraConfig
 from transformers import AutoConfig, Wav2Vec2FeatureExtractor, HubertForSequenceClassification
-from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
+from transformers import AutoFeatureExtractor, AutoModelForAudioClassification, Wav2Vec2Model
 from transformers import AdamW
+from transformers import Wav2Vec2Model
+
 from tqdm import tqdm
 
 from src.utils import mixup_data, mixup_criterion
@@ -17,8 +19,129 @@ from src.lr_schedulers import LearningRateWarmUP, WarmupCosineAnnealingLR
 from src.losses import CenterLoss
 from src.AASIST import AASISTModule
 from src.lora import LoRAWrapper
+from src.RawNet2 import RawNet2
 
 from itertools import chain
+
+
+
+class Wav2Vec2_RawNet2(L.LightningModule):
+    def __init__(self, args):
+        super(Wav2Vec2_RawNet2, self).__init__()
+        
+        self.config = args
+        
+        # 모델 및 특징 추출기 설정
+        self.sampling_rate = 16_000
+        
+        self.feature_extractor = Wav2Vec2Model.from_pretrained(
+            "facebook/wav2vec2-large-960h-lv60-self", 
+            torch_dtype=torch.float32, 
+            attn_implementation="sdpa", 
+            num_hidden_layers=12,
+        )
+        self.classifier = RawNet2()
+        
+        # freeze early layers
+        self.FTL = 9
+        self._set_trainable_parameters()
+        
+        # loss functions
+        self.ce_sup_loss_fn = nn.CrossEntropyLoss()
+        self.ce_unsup_loss_fn = nn.CrossEntropyLoss(reduction='none')
+        self.center_loss_fn = CenterLoss(num_classes=4, feat_dim=2)
+        
+        # FixMatch hparams
+        self.fixmatch_threshold = 0.95
+        
+        # metric
+        self.acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=4)
+    
+    def _set_trainable_parameters(self):
+        # Feature extractor의 모든 파라미터를 고정
+        for param in self.feature_extractor.parameters():
+            param.requires_grad = False
+
+        for i, transformer_layer in enumerate(self.feature_extractor.encoder.layers):
+            if i >= self.FTL: # 우측 12 - FTL 개의 layers만 fine tunnig
+                for param in transformer_layer.parameters():
+                    param.requires_grad = True
+            
+        trainable_layers = filter(lambda p: p.requires_grad, self.parameters())
+        print(f"======== Trainable Lora layers ===========")
+        for trainable_layer in trainable_layers:
+            print(trainable_layer.shape)
+        print(f"==========================================")    
+            
+    def forward(self, x):
+        output_fe = self.feature_extractor(x)
+        feature = output_fe['extract_features']
+
+        output = self.classifier(feature)
+
+        return output
+
+    def calculate_unsupervised_loss(self, weak_unlabeled_outputs, strong_aug_unlabeled_outputs):
+        q_b = weak_unlabeled_outputs
+        q_b_hat = torch.argmax(q_b, dim=1)
+        
+        conf, _ = torch.max(q_b, dim=1)
+        mask = conf > self.fixmatch_threshold
+
+        H = self.ce_unsup_loss_fn(strong_aug_unlabeled_outputs, q_b_hat)
+        
+        return torch.mean(mask * H)
+
+    def training_step(self, batch, batch_idx):
+        labeled_inputs, weak_aug_unlabeled_inputs, strong_aug_unlabeled_inputs, targets = batch
+        
+        labeled_outputs = self(labeled_inputs)
+        weak_unlabeled_outputs = self(weak_aug_unlabeled_inputs)
+        strong_aug_unlabeled_outputs = self(strong_aug_unlabeled_inputs)
+        
+        loss_supervised = self.ce_sup_loss_fn(labeled_outputs, targets)
+        loss_unsupervised = self.calculate_unsupervised_loss(weak_unlabeled_outputs, strong_aug_unlabeled_outputs)
+        
+        loss = loss_supervised + loss_unsupervised
+        
+        accuracy = self.acc_metric(labeled_outputs, targets)
+        
+        self.log("train_accuracy", accuracy)
+        self.log("train_sup_loss", loss_supervised)
+        self.log("train_unsup_loss", loss_unsupervised)
+        self.log("train_loss", loss)
+        
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        labeled_inputs, weak_aug_unlabeled_inputs, strong_aug_unlabeled_inputs, targets = batch
+        
+        labeled_outputs = self(labeled_inputs)
+        weak_unlabeled_outputs = self(weak_aug_unlabeled_inputs)
+        strong_aug_unlabeled_outputs = self(strong_aug_unlabeled_inputs)
+        
+        loss_supervised = self.ce_sup_loss_fn(labeled_outputs, targets)
+        loss_unsupervised = self.calculate_unsupervised_loss(weak_unlabeled_outputs, strong_aug_unlabeled_outputs)
+        
+        loss = loss_supervised + loss_unsupervised
+
+        accuracy = self.acc_metric(labeled_outputs, targets)
+        
+        self.log("val_accuracy", accuracy)
+        self.log("val_sup_loss", loss_supervised)
+        self.log("val_unsup_loss", loss_unsupervised)
+        self.log("val_loss", loss)
+        
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        pass
+
+    def configure_optimizers(self):
+        optimizer = AdamW(params=self.parameters(), lr=self.config.lr, weight_decay=1e-2)
+        scheduler = WarmupCosineAnnealingLR(optimizer=optimizer, warmup_steps=1000, total_steps=10000, min_lr=1e-9)
+        
+        return [optimizer], [{'scheduler': scheduler, 'interval': 'step'}]
 
 
 

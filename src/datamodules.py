@@ -817,11 +817,8 @@ class FixMatchDataset(torch.utils.data.Dataset):
             self.real_indices = np.where(df['label'] == 'real')[0]
             self.fake_indices = np.where(df['label'] == 'fake')[0]
         
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
-        self.sampling_rate = self.feature_extractor.sampling_rate
-        
-        # fixmatch hparams
-        self.fixmatch_mu = 7
+        # self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+        self.sampling_rate = 16_000
         
     def __len__(self):
         return self.df.shape[0]
@@ -931,17 +928,21 @@ class FixMatchDataset(torch.utils.data.Dataset):
             unlabeled_audio = self._load_ogg_file_from_row(self.unlabeled_df.iloc[unlabeled_idx])
             
             labeled_audio = self._weak_audio_augmentation(labeled_audio)
-            strong_aug_unlabeled_audio = self._strong_audio_augmentation(unlabeled_audio)
             weak_aug_unlabeled_audio = self._weak_audio_augmentation(unlabeled_audio)
+            strong_aug_unlabeled_audio = self._strong_audio_augmentation(unlabeled_audio)
             
-            labeled_inputs = self.feature_extractor(labeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            labeled_inputs = labeled_inputs.input_values.squeeze()
+            labeled_inputs = torch.tensor(labeled_audio)
+            weak_aug_unlabeled_inputs = torch.tensor(weak_aug_unlabeled_audio)
+            strong_aug_unlabeled_inputs = torch.tensor(strong_aug_unlabeled_audio)
             
-            strong_aug_unlabeled_inputs = self.feature_extractor(strong_aug_unlabeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            strong_aug_unlabeled_inputs = strong_aug_unlabeled_inputs.input_values.squeeze()
+            # labeled_inputs = self.feature_extractor(labeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
+            # labeled_inputs = labeled_inputs.input_values.squeeze()
             
-            weak_aug_unlabeled_inputs = self.feature_extractor(weak_aug_unlabeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            weak_aug_unlabeled_inputs = weak_aug_unlabeled_inputs.input_values.squeeze()
+            # strong_aug_unlabeled_inputs = self.feature_extractor(strong_aug_unlabeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
+            # strong_aug_unlabeled_inputs = strong_aug_unlabeled_inputs.input_values.squeeze()
+            
+            # weak_aug_unlabeled_inputs = self.feature_extractor(weak_aug_unlabeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
+            # weak_aug_unlabeled_inputs = weak_aug_unlabeled_inputs.input_values.squeeze()
             
             return labeled_inputs, weak_aug_unlabeled_inputs, strong_aug_unlabeled_inputs, targets
         else:

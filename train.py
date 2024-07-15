@@ -1,4 +1,5 @@
 import torch
+torch.set_float32_matmul_precision('medium')
 
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
@@ -9,7 +10,7 @@ import wandb
 
 from src.models import (
     MLP, EModel, AASIST, Wav2Vec2Facebook,
-    Wav2Vec2FacebookFixMatch
+    Wav2Vec2FacebookFixMatch, Wav2Vec2_RawNet2
 )
 from src.utils import seed_everything
 from src.datamodules import (
@@ -51,7 +52,7 @@ def main(args):
     
     # Wav2Vec2 + Lora + train-test-augmentation + FixMatch(SSL)
     datamodule = FixMatchDataModule(train_csv=train_csv, test_csv=test_csv, unlabeled_csv=unlabeled_csv, config=args)
-    model = Wav2Vec2FacebookFixMatch(args=args, train=True)
+    model = Wav2Vec2_RawNet2(args=args)
     
     #==========================================================================================================    
     
