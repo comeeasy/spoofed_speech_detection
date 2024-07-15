@@ -7,9 +7,17 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, Learning
 import argparse
 import wandb
 
-from src.models import MLP, EModel, AASIST, Wav2Vec2Facebook
+from src.models import (
+    MLP, EModel, AASIST, Wav2Vec2Facebook,
+    Wav2Vec2FacebookFixMatch
+)
 from src.utils import seed_everything
-from src.datamodules import MFCCDataModule, EMDataModule, Wav2Vec2DataModule, AASIST2DataModule, AASISTCenterLossDataModule
+from src.datamodules import (
+    MFCCDataModule, EMDataModule, Wav2Vec2DataModule, 
+    AASIST2DataModule, AASISTCenterLossDataModule,
+    FixMatchDataModule
+)
+
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -22,6 +30,7 @@ def main(args):
 
 
     train_csv, test_csv = "../dataset/train.csv", "../dataset/test.csv"
+    unlabeled_csv = "../dataset/unlabeled_data.csv"
 
     # Model ===================================================================================================    
     # MFCC & MLP
@@ -37,22 +46,21 @@ def main(args):
     # model = Wav2Vec2Facebook(args)
     
     # AASIST
-    datamodule = AASISTCenterLossDataModule(train_csv=train_csv, test_csv=test_csv, config=args)
-    model = AASIST(args)
+    # datamodule = AASISTCenterLossDataModule(train_csv=train_csv, test_csv=test_csv, config=args)
+    # model = AASIST(args)
+    
+    # Wav2Vec2 + Lora + train-test-augmentation + FixMatch(SSL)
+    datamodule = FixMatchDataModule(train_csv=train_csv, test_csv=test_csv, unlabeled_csv=unlabeled_csv, config=args)
+    model = Wav2Vec2FacebookFixMatch(args=args, train=True)
+    
     #==========================================================================================================    
     
     
-    early_stopping_callback = EarlyStopping (
-        monitor='val_metric',   # Monitor validation loss
-        patience=5,             # Number of epochs with no improvement after which training will be stopped
-        verbose=True,           # Display information about early stopping
-        mode='min'              # Minimize the monitored quantity
-    )
     checkpoint_callback = ModelCheckpoint(
-        monitor='val_metric',       # Monitor validation metric
-        filename='best-checkpoint_aug_oneshot', # Filename template for the checkpoints
+        monitor='val_accuracy',       # Monitor validation metric
+        filename='best-checkpoint', # Filename template for the checkpoints
         save_top_k=1,               # Save only the best model
-        mode='min'                  # Minimize the monitored quantity
+        mode='max'                  # Minimize the monitored quantity
     )
     lr_monitor = LearningRateMonitor(logging_interval='step')
     
@@ -61,7 +69,6 @@ def main(args):
         devices=[1], 
         logger=wandb_logger, 
         callbacks=[
-            early_stopping_callback, 
             checkpoint_callback,
             lr_monitor
         ], 

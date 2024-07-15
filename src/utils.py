@@ -109,7 +109,9 @@ def auc_brier_ece(y_true, y_prob):
     ece_scores = []
     
     _y_true = y_true.detach().cpu().numpy()
-    _y_prob = y_prob.detach().cpu().numpy()
+    
+    # _y_prob = y_prob.detach().cpu().numpy()
+    _y_prob = y_prob
     
     for i in range(2):
         # B x 2 -> B

@@ -539,7 +539,6 @@ class AASISTModule(nn.Module):
         self.pool_hT2 = GraphPool(pool_ratios[2], gat_dims[1], 0.3)
 
         self.out_layer = nn.Linear(5 * gat_dims[1], 2)
-        self.out_centor_loss_layer = nn.Linear(5 * gat_dims[1], 4)
 
     def forward(self, x, Freq_aug=False):
 
@@ -623,8 +622,5 @@ class AASISTModule(nn.Module):
 
         last_hidden = self.drop(last_hidden)
         output = self.out_layer(last_hidden)
-        # output_centor_loss = self.out_centor_loss_layer(last_hidden)
-
-        # print(f"last_hidden: {last_hidden.shape}")
 
         return last_hidden, output
