@@ -75,6 +75,7 @@ def main(args):
         ], 
         max_epochs=args.epochs
     )
+    
     trainer.fit(model, datamodule=datamodule)
     trainer.test(model, datamodule=datamodule)
     

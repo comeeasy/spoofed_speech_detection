@@ -48,8 +48,12 @@ class Wav2Vec2_RawNet2(L.LightningModule):
         
         # loss functions
         self.ce_sup_loss_fn = nn.CrossEntropyLoss()
-        self.ce_unsup_loss_fn = nn.CrossEntropyLoss(reduction='none')
-        self.center_loss_fn = CenterLoss(num_classes=4, feat_dim=2)
+        # self.ce_unsup_loss_fn = nn.CrossEntropyLoss(reduction='none')
+        
+        # center loss setting
+        # self.center_loss_fn = CenterLoss(num_classes=4, feat_dim=4)
+        # self.automatic_optimization = False
+        # self.alpha = 0.8
         
         # FixMatch hparams
         self.fixmatch_threshold = 0.95
@@ -99,17 +103,34 @@ class Wav2Vec2_RawNet2(L.LightningModule):
         weak_unlabeled_outputs = self(weak_aug_unlabeled_inputs)
         strong_aug_unlabeled_outputs = self(strong_aug_unlabeled_inputs)
         
-        loss_supervised = self.ce_sup_loss_fn(labeled_outputs, targets)
-        loss_unsupervised = self.calculate_unsupervised_loss(weak_unlabeled_outputs, strong_aug_unlabeled_outputs)
+        loss_supervised   = self.ce_sup_loss_fn(labeled_outputs, targets)
+        # loss_center       = self.center_loss_fn(labeled_outputs, targets)
+        # loss_unsupervised = self.calculate_unsupervised_loss(weak_unlabeled_outputs, strong_aug_unlabeled_outputs)
         
-        loss = loss_supervised + loss_unsupervised
+        loss = loss_supervised
+        # loss = loss_supervised + loss_unsupervised + self.alpha * loss_center
         
         accuracy = self.acc_metric(labeled_outputs, targets)
         
         self.log("train_accuracy", accuracy)
         self.log("train_sup_loss", loss_supervised)
-        self.log("train_unsup_loss", loss_unsupervised)
+        # self.log("train_unsup_loss", loss_unsupervised)
+        # self.log("train_center_loss", loss_center)
         self.log("train_loss", loss)
+        
+        ########### Center loss ====================
+        # chech if `self.automatic_optimization = False`
+        #
+        # opt = self.optimizers()
+        # scheduler = self.lr_schedulers()
+        # opt.zero_grad()
+        # loss.backward()
+        # # multiple (1./alpha) in order to remove the effect of alpha on updating centers
+        # for param in self.center_loss_fn.parameters():
+        #     param.grad.data *= (1./self.alpha)
+        # opt.step()
+        # scheduler.step()
+        #############################################
         
         return loss
 
@@ -120,16 +141,19 @@ class Wav2Vec2_RawNet2(L.LightningModule):
         weak_unlabeled_outputs = self(weak_aug_unlabeled_inputs)
         strong_aug_unlabeled_outputs = self(strong_aug_unlabeled_inputs)
         
-        loss_supervised = self.ce_sup_loss_fn(labeled_outputs, targets)
-        loss_unsupervised = self.calculate_unsupervised_loss(weak_unlabeled_outputs, strong_aug_unlabeled_outputs)
+        loss_supervised   = self.ce_sup_loss_fn(labeled_outputs, targets)
+        # loss_center       = self.center_loss_fn(labeled_outputs, targets)
+        # loss_unsupervised = self.calculate_unsupervised_loss(weak_unlabeled_outputs, strong_aug_unlabeled_outputs)
         
-        loss = loss_supervised + loss_unsupervised
-
+        loss = loss_supervised
+        # loss = loss_supervised + loss_unsupervised + self.alpha * loss_center
+        
         accuracy = self.acc_metric(labeled_outputs, targets)
         
         self.log("val_accuracy", accuracy)
         self.log("val_sup_loss", loss_supervised)
-        self.log("val_unsup_loss", loss_unsupervised)
+        # self.log("val_unsup_loss", loss_unsupervised)
+        # self.log("val_center_loss", loss_center)
         self.log("val_loss", loss)
         
         return loss
@@ -139,7 +163,7 @@ class Wav2Vec2_RawNet2(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer = AdamW(params=self.parameters(), lr=self.config.lr, weight_decay=1e-2)
-        scheduler = WarmupCosineAnnealingLR(optimizer=optimizer, warmup_steps=1000, total_steps=10000, min_lr=1e-9)
+        scheduler = WarmupCosineAnnealingLR(optimizer=optimizer, warmup_steps=1000, total_steps=3000, min_lr=1e-8)
         
         return [optimizer], [{'scheduler': scheduler, 'interval': 'step'}]
 
@@ -525,7 +549,6 @@ class AASIST(L.LightningModule):
         
         opt = self.optimizers()
         scheduler = self.lr_schedulers()
-        
         opt.zero_grad()
         loss.backward()
         # multiple (1./alpha) in order to remove the effect of alpha on updating centers

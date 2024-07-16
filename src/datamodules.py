@@ -760,9 +760,9 @@ class FixMatchDataModule(L.LightningDataModule):
     
     def setup(self, stage: str): # K-Fold 는 추후 추가..
         train_df, val_df, _, _ = model_selection.train_test_split(self.train_df, self.train_df['label'], test_size=0.1, random_state=self.config.seed)
-        self.train_dset = FixMatchDataset(df=train_df, unlabeled_df=self.unlabeled_df, train_mode=True, model_name=self.config.model_name)
-        self.val_dset = FixMatchDataset(df=val_df, unlabeled_df=self.unlabeled_df, train_mode=True, model_name=self.config.model_name)
-        self.test_dset = FixMatchDataset(df=self.test_df, train_mode=False, model_name=self.config.model_name)
+        self.train_dset = FixMatchDataset(df=train_df, unlabeled_df=self.unlabeled_df, train_mode=True)
+        self.val_dset = FixMatchDataset(df=val_df, unlabeled_df=self.unlabeled_df, train_mode=True)
+        self.test_dset = FixMatchDataset(df=self.test_df, train_mode=False)
         
     # Collate 함수 정의
     def _collate_fn(self, batch):
@@ -806,7 +806,7 @@ class FixMatchDataModule(L.LightningDataModule):
 
 # 데이터셋 클래스 정의
 class FixMatchDataset(torch.utils.data.Dataset):
-    def __init__(self, df, model_name, train_mode=True, unlabeled_df=None):
+    def __init__(self, df, train_mode=True, unlabeled_df=None):
         super().__init__()
         self.df = df
         self.train_mode = train_mode
@@ -867,6 +867,16 @@ class FixMatchDataset(torch.utils.data.Dataset):
         
         return augmented_data
     
+    def _pad(self, x, max_len=16000 * 8):
+        # https://github.com/clovaai/aasist/blob/main/data_utils.py
+        x_len = x.shape[0]  
+        if x_len > max_len:
+            return x[:max_len]
+        # need to pad
+        num_repeats = int(max_len / x_len)
+        padded_x = np.tile(x, (1, num_repeats))[:, :max_len][0]
+        return padded_x
+
     def get_mixed_audios_and_targets(self, idx):
         if np.random.rand() <= (1/4):
             # sample (X, X)
@@ -926,28 +936,27 @@ class FixMatchDataset(torch.utils.data.Dataset):
             labeled_audio, targets = self.get_mixed_audios_and_targets(idx)
             unlabeled_idx = np.random.random_integers(len(self.unlabeled_df)-1)
             unlabeled_audio = self._load_ogg_file_from_row(self.unlabeled_df.iloc[unlabeled_idx])
+            unlabeled_audio = self._pad(unlabeled_audio)
             
+            # augmentation
             labeled_audio = self._weak_audio_augmentation(labeled_audio)
             weak_aug_unlabeled_audio = self._weak_audio_augmentation(unlabeled_audio)
             strong_aug_unlabeled_audio = self._strong_audio_augmentation(unlabeled_audio)
             
+            # padding
+            labeled_audio = self._pad(labeled_audio)
+            weak_aug_unlabeled_audio = self._pad(weak_aug_unlabeled_audio)
+            strong_aug_unlabeled_audio = self._pad(strong_aug_unlabeled_audio)
+            
+            # make tensor
             labeled_inputs = torch.tensor(labeled_audio)
             weak_aug_unlabeled_inputs = torch.tensor(weak_aug_unlabeled_audio)
             strong_aug_unlabeled_inputs = torch.tensor(strong_aug_unlabeled_audio)
-            
-            # labeled_inputs = self.feature_extractor(labeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            # labeled_inputs = labeled_inputs.input_values.squeeze()
-            
-            # strong_aug_unlabeled_inputs = self.feature_extractor(strong_aug_unlabeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            # strong_aug_unlabeled_inputs = strong_aug_unlabeled_inputs.input_values.squeeze()
-            
-            # weak_aug_unlabeled_inputs = self.feature_extractor(weak_aug_unlabeled_audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            # weak_aug_unlabeled_inputs = weak_aug_unlabeled_inputs.input_values.squeeze()
             
             return labeled_inputs, weak_aug_unlabeled_inputs, strong_aug_unlabeled_inputs, targets
         else:
             row = self.df.iloc[idx]
             audio = self._load_ogg_file_from_row(row)
-            inputs = self.feature_extractor(audio, sampling_rate=self.sampling_rate, return_tensors="pt", padding=True)
-            input_values = inputs.input_values.squeeze()
-            return input_values
+            audio = self._pad(audio)
+            audio = torch.tensor(audio)
+            return audio
