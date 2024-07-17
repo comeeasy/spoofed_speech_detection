@@ -239,7 +239,7 @@ class RawNet2(nn.Module):
             'gru_node': 1024,
             'nb_gru_layer': 1,
             'nb_samp': 59049,
-            'nb_classes': 4 # final output shape
+            'nb_classes': 6 # final output shape
         }
 
         self.ln = LayerNorm(d_args['nb_samp'])

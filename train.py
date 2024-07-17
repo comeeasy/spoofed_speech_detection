@@ -77,7 +77,6 @@ def main(args):
     )
     
     trainer.fit(model, datamodule=datamodule)
-    trainer.test(model, datamodule=datamodule)
     
     wandb.finish()
 
